@@ -15,7 +15,18 @@ const PRODUCTS = [
 ];
 /** ========================================================= */
 
-const APPLE_BASE = 'https://www.apple.com/th/shop/pickup-message-recommendations';
+// ✅ เพิ่มบรรทัดนี้เข้ามาแทน (เอา URL ของคุณมาใส่)
+const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzwUKA1y4zijRA2UDAgWrm7mIRfAoYuNU9eSsYiyh6vCsoMbTH0euLnM2bc3PdbwdVn/exec';
+
+// ✅ แก้ไขฟังก์ชัน buildUrl ให้ชี้ไปที่ GAS
+function buildUrl(store: string, product: string) {
+  const qs = new URLSearchParams({
+    store,
+    product,
+  });
+  // Vercel จะยิงไปที่ GAS พร้อมส่งพารามิเตอร์ 2 ตัว
+  return `${GAS_WEB_APP_URL}?${qs.toString()}`;
+}
 const REQUEST_TIMEOUT_MS = 8000;
 const MAX_RETRIES = 1;
 const RETRY_BACKOFF_MS = 500;
