@@ -104,6 +104,12 @@ async function fetchOne(store: string, product: string) {
   return { store, product, ok: false, error: lastError || 'unknown error', data: null };
 }
 
+type CellState = {
+  fetched: boolean; // true = ดึงข้อมูลจาก Apple สำเร็จสำหรับคู่นี้
+  available: boolean; // มีความหมายเมื่อ fetched === true เท่านั้น
+  error: string | null; // มีค่าเมื่อ fetched === false
+};
+
 export async function GET() {
   const requests: Promise<Awaited<ReturnType<typeof fetchOne>>>[] = [];
   for (const store of STORES) {
@@ -114,28 +120,29 @@ export async function GET() {
 
   const results = await Promise.all(requests);
 
-  // ชื่อสาขา (เติมทีหลังจากผล ถ้าดึงได้)
   const storeNames: Record<string, string> = {};
+  const productNames: Record<string, string> = {};
 
-  // productName + availability per store
-  const byProduct: Record<
-    string,
-    { name: string; stores: Record<string, { available: boolean }> }
-  > = {};
+  // สถานะต่อ "รุ่น × สาขา" แยกกันตรงๆ ไม่ปนกัน — เริ่มต้นทุกคู่เป็น "ยังไม่ทราบผล"
+  const cells: Record<string, Record<string, CellState>> = {};
   for (const pn of PRODUCTS) {
-    byProduct[pn] = { name: pn, stores: {} };
+    cells[pn] = {};
     for (const st of STORES) {
-      byProduct[pn].stores[st] = { available: false };
+      cells[pn][st] = { fetched: false, available: false, error: 'ยังไม่ได้ดึงข้อมูล' };
     }
   }
 
-  const errors: { store: string; product: string; error: string }[] = [];
-
   for (const r of results) {
+    // กรณีดึงข้อมูล "คู่นี้" ไม่สำเร็จ — ระบุชัดว่าไม่ใช่ "ไม่มีของ" แต่คือ "เช็คไม่ได้"
     if (!r.ok || !r.data) {
-      errors.push({ store: r.store, product: r.product, error: r.error || 'unknown' });
+      cells[r.product][r.store] = {
+        fetched: false,
+        available: false,
+        error: r.error || 'ดึงข้อมูลไม่สำเร็จ',
+      };
       continue;
     }
+
     const stores: StoreEntry[] =
       r.data?.body?.content?.pickupMessage?.stores ||
       r.data?.pickupMessage?.stores ||
@@ -143,38 +150,62 @@ export async function GET() {
       r.data?.PickupMessage?.stores ||
       [];
 
+    // เจอ response แต่ไม่พบข้อมูลสาขานี้ในนั้น — ยังถือว่าดึงสำเร็จ (Apple ตอบ 200) แต่ไม่มีข้อมูลสาขานั้นเจาะจง
+    let matchedThisStore = false;
+
     stores.forEach((s) => {
       const code = String(s.storeNumber || '').trim();
       if (!code) return;
       if (s.storeName) storeNames[code] = s.storeName;
 
       const pa = (s.partsAvailability || {})[r.product];
+      if (code === r.store) matchedThisStore = true;
       if (!pa) return;
 
       const name =
         pa.messageTypes?.regular?.storePickupProductTitle ||
         pa.messageTypes?.compact?.storePickupProductTitle ||
         r.product;
+      productNames[r.product] = name;
 
-      if (!byProduct[r.product]) byProduct[r.product] = { name, stores: {} };
-      byProduct[r.product].name = name;
-      if (!byProduct[r.product].stores[code]) byProduct[r.product].stores[code] = { available: false };
-      byProduct[r.product].stores[code].available =
-        byProduct[r.product].stores[code].available || decideAvailable(pa);
+      if (!cells[r.product]) cells[r.product] = {};
+      const prev = cells[r.product][code];
+      cells[r.product][code] = {
+        fetched: true,
+        available: Boolean(prev?.available) || decideAvailable(pa),
+        error: null,
+      };
     });
+
+    // ดึง HTTP สำเร็จ แต่ Apple ไม่ส่งข้อมูลสาขานี้กลับมาเลย (เช่น store code ผิด) — ถือเป็น fetched:true, available:false
+    if (!matchedThisStore && cells[r.product][r.store]?.error) {
+      cells[r.product][r.store] = { fetched: true, available: false, error: null };
+    }
   }
+
+  const products = PRODUCTS.map((pn) => ({
+    partNumber: pn,
+    name: productNames[pn] || pn,
+    stores: STORES.map((code) => {
+      const c = cells[pn][code];
+      return {
+        code,
+        fetched: c.fetched,
+        available: c.fetched ? c.available : false,
+        error: c.fetched ? null : c.error,
+      };
+    }),
+  }));
+
+  const failedCount = products.reduce(
+    (sum, p) => sum + p.stores.filter((s) => !s.fetched).length,
+    0
+  );
 
   return NextResponse.json({
     checkedAt: new Date().toISOString(),
     stores: STORES.map((code) => ({ code, name: storeNames[code] || code })),
-    products: PRODUCTS.map((pn) => ({
-      partNumber: pn,
-      name: byProduct[pn]?.name || pn,
-      stores: STORES.map((code) => ({
-        code,
-        available: byProduct[pn]?.stores[code]?.available || false,
-      })),
-    })),
-    errors,
+    products,
+    failedCount,
   });
 }

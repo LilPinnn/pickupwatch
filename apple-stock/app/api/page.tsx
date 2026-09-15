@@ -3,16 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 type StoreRef = { code: string; name: string };
+type CellResult = { code: string; fetched: boolean; available: boolean; error: string | null };
 type ProductRow = {
   partNumber: string;
   name: string;
-  stores: { code: string; available: boolean }[];
+  stores: CellResult[];
 };
 type StockResponse = {
   checkedAt: string;
   stores: StoreRef[];
   products: ProductRow[];
-  errors: { store: string; product: string; error: string }[];
+  failedCount: number;
 };
 
 const POLL_MS = 30_000;
@@ -98,12 +99,24 @@ export default function Page() {
       </header>
 
       <div className="board-wrap">
+        <div className="legend">
+          <span className="legend-item">
+            <span className="status-dot available" /> มีของ พร้อมรับ
+          </span>
+          <span className="legend-item">
+            <span className="status-dot" /> ดึงข้อมูลสำเร็จ แต่ไม่มีของ
+          </span>
+          <span className="legend-item">
+            <span className="status-dot err" /> เช็คไม่สำเร็จ (ไม่ทราบว่ามีของหรือไม่)
+          </span>
+        </div>
+
         <div className="board-meta">
           <h2>สถานะสต็อกพร้อมรับที่สาขา</h2>
           {fetchError && <span className="error-note">เชื่อมต่อไม่สำเร็จ: {fetchError}</span>}
-          {data && data.errors.length > 0 && (
+          {data && data.failedCount > 0 && (
             <span className="error-note">
-              ดึงข้อมูลไม่สำเร็จ {data.errors.length} รายการ (ระบบลองใหม่ให้อัตโนมัติแล้ว)
+              เช็คไม่สำเร็จ {data.failedCount} รายการ (ระบบลองใหม่ให้อัตโนมัติแล้วแต่ยังไม่ได้ผล)
             </span>
           )}
         </div>
@@ -127,14 +140,26 @@ export default function Page() {
                   <span className="name">{p.name}</span>
                   <span className="part">{p.partNumber}</span>
                 </div>
-                {p.stores.map((s) => (
-                  <div className="cell status-cell" data-store={s.code} key={s.code}>
-                    <span className={`status-dot ${s.available ? 'available' : ''}`} />
-                    <span className={`status-text ${s.available ? 'available' : ''}`}>
-                      {s.available ? 'มีของ พร้อมรับ' : 'ไม่มีของ'}
-                    </span>
-                  </div>
-                ))}
+                {p.stores.map((s) => {
+                  const state = !s.fetched ? 'error' : s.available ? 'available' : 'unavailable';
+                  const label =
+                    state === 'error'
+                      ? 'เช็คไม่สำเร็จ'
+                      : state === 'available'
+                      ? 'มีของ พร้อมรับ'
+                      : 'ไม่มีของ';
+                  return (
+                    <div className="cell status-cell" data-store={s.code} key={s.code}>
+                      <span className={`status-dot ${state === 'available' ? 'available' : ''} ${state === 'error' ? 'err' : ''}`} />
+                      <span
+                        className={`status-text ${state === 'available' ? 'available' : ''} ${state === 'error' ? 'err' : ''}`}
+                        title={s.error || undefined}
+                      >
+                        {label}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>
