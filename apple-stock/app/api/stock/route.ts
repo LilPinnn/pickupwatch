@@ -49,6 +49,7 @@ type StoreEntry = {
   partsAvailability?: Record<string, PartAvailability>;
 };
 
+
 function decideAvailable(pa?: PartAvailability): boolean {
   if (!pa) return false;
   const displayOk = String(pa.pickupDisplay || '').toLowerCase() === 'available';
