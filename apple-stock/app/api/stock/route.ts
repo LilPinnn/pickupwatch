@@ -49,18 +49,6 @@ type StoreEntry = {
   partsAvailability?: Record<string, PartAvailability>;
 };
 
-function buildUrl(store: string, product: string) {
-  const qs = new URLSearchParams({
-    fae: 'true',
-    'mts.0': 'regular',
-    'mts.1': 'compact',
-    searchNearby: 'true',
-    store,
-    product,
-  });
-  return `${APPLE_BASE}?${qs.toString()}`;
-}
-
 function decideAvailable(pa?: PartAvailability): boolean {
   if (!pa) return false;
   const displayOk = String(pa.pickupDisplay || '').toLowerCase() === 'available';
