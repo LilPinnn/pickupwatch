@@ -60,10 +60,12 @@ function decideAvailable(pa?: PartAvailability): boolean {
   return displayOk || (flagOk && buyOk);
 }
 
+// 📌 [แก้ไข 1] เพิ่มการเก็บตัวแปร lastStatus และ Return คืนค่า status
 async function fetchOne(store: string, product: string) {
   const url = buildUrl(store, product);
   let attempt = 0;
   let lastError = '';
+  let lastStatus = 0; 
 
   while (attempt <= MAX_RETRIES) {
     const controller = new AbortController();
@@ -82,6 +84,8 @@ async function fetchOne(store: string, product: string) {
         cache: 'no-store',
       });
       clearTimeout(timeout);
+      
+      lastStatus = res.status; // เก็บ status ของรอบนี้ไว้
 
       if (res.status === 429 || res.status >= 500) {
         lastError = `HTTP ${res.status}`;
@@ -90,10 +94,10 @@ async function fetchOne(store: string, product: string) {
         continue;
       }
       if (!res.ok) {
-        return { store, product, ok: false, error: `HTTP ${res.status}`, data: null };
+        return { store, product, status: res.status, ok: false, error: `HTTP ${res.status}`, data: null };
       }
       const json = await res.json();
-      return { store, product, ok: true, error: null, data: json };
+      return { store, product, status: res.status, ok: true, error: null, data: json };
     } catch (e: any) {
       clearTimeout(timeout);
       lastError = e?.name === 'AbortError' ? 'timeout' : String(e?.message || e);
@@ -101,14 +105,8 @@ async function fetchOne(store: string, product: string) {
       attempt++;
     }
   }
-  return { store, product, ok: false, error: lastError || 'unknown error', data: null };
+  return { store, product, status: lastStatus, ok: false, error: lastError || 'unknown error', data: null };
 }
-
-type CellState = {
-  fetched: boolean; // true = ดึงข้อมูลจาก Apple สำเร็จสำหรับคู่นี้
-  available: boolean; // มีความหมายเมื่อ fetched === true เท่านั้น
-  error: string | null; // มีค่าเมื่อ fetched === false
-};
 
 export async function GET() {
   const requests: Promise<Awaited<ReturnType<typeof fetchOne>>>[] = [];
@@ -119,30 +117,34 @@ export async function GET() {
   }
 
   const results = await Promise.all(requests);
-
   const storeNames: Record<string, string> = {};
-  const productNames: Record<string, string> = {};
 
-  // สถานะต่อ "รุ่น × สาขา" แยกกันตรงๆ ไม่ปนกัน — เริ่มต้นทุกคู่เป็น "ยังไม่ทราบผล"
-  const cells: Record<string, Record<string, CellState>> = {};
+  // 📌 [แก้ไข 2] เพิ่ม status: number ใน Type ของ stores
+  const byProduct: Record<
+    string,
+    { name: string; stores: Record<string, { available: boolean; status: number }> }
+  > = {};
+  
   for (const pn of PRODUCTS) {
-    cells[pn] = {};
+    byProduct[pn] = { name: pn, stores: {} };
     for (const st of STORES) {
-      cells[pn][st] = { fetched: false, available: false, error: 'ยังไม่ได้ดึงข้อมูล' };
+      byProduct[pn].stores[st] = { available: false, status: 0 };
     }
   }
 
+  const errors: { store: string; product: string; status: number; error: string }[] = [];
+
   for (const r of results) {
-    // กรณีดึงข้อมูล "คู่นี้" ไม่สำเร็จ — ระบุชัดว่าไม่ใช่ "ไม่มีของ" แต่คือ "เช็คไม่ได้"
-    if (!r.ok || !r.data) {
-      cells[r.product][r.store] = {
-        fetched: false,
-        available: false,
-        error: r.error || 'ดึงข้อมูลไม่สำเร็จ',
-      };
-      continue;
+    // 📌 [แก้ไข 3] อัปเดตค่า status เข้าไปในโครงสร้างข้อมูลเสมอ ไม่ว่าจะ fetch สำเร็จหรือไม่
+    if (byProduct[r.product] && byProduct[r.product].stores[r.store]) {
+      byProduct[r.product].stores[r.store].status = r.status;
     }
 
+    if (!r.ok || !r.data) {
+      errors.push({ store: r.store, product: r.product, status: r.status, error: r.error || 'unknown' });
+      continue;
+    }
+    
     const stores: StoreEntry[] =
       r.data?.body?.content?.pickupMessage?.stores ||
       r.data?.pickupMessage?.stores ||
@@ -150,62 +152,39 @@ export async function GET() {
       r.data?.PickupMessage?.stores ||
       [];
 
-    // เจอ response แต่ไม่พบข้อมูลสาขานี้ในนั้น — ยังถือว่าดึงสำเร็จ (Apple ตอบ 200) แต่ไม่มีข้อมูลสาขานั้นเจาะจง
-    let matchedThisStore = false;
-
     stores.forEach((s) => {
       const code = String(s.storeNumber || '').trim();
       if (!code) return;
       if (s.storeName) storeNames[code] = s.storeName;
 
       const pa = (s.partsAvailability || {})[r.product];
-      if (code === r.store) matchedThisStore = true;
       if (!pa) return;
 
       const name =
         pa.messageTypes?.regular?.storePickupProductTitle ||
         pa.messageTypes?.compact?.storePickupProductTitle ||
         r.product;
-      productNames[r.product] = name;
 
-      if (!cells[r.product]) cells[r.product] = {};
-      const prev = cells[r.product][code];
-      cells[r.product][code] = {
-        fetched: true,
-        available: Boolean(prev?.available) || decideAvailable(pa),
-        error: null,
-      };
+      if (!byProduct[r.product]) byProduct[r.product] = { name, stores: {} };
+      byProduct[r.product].name = name;
+      if (!byProduct[r.product].stores[code]) byProduct[r.product].stores[code] = { available: false, status: r.status };
+      byProduct[r.product].stores[code].available =
+        byProduct[r.product].stores[code].available || decideAvailable(pa);
     });
-
-    // ดึง HTTP สำเร็จ แต่ Apple ไม่ส่งข้อมูลสาขานี้กลับมาเลย (เช่น store code ผิด) — ถือเป็น fetched:true, available:false
-    if (!matchedThisStore && cells[r.product][r.store]?.error) {
-      cells[r.product][r.store] = { fetched: true, available: false, error: null };
-    }
   }
-
-  const products = PRODUCTS.map((pn) => ({
-    partNumber: pn,
-    name: productNames[pn] || pn,
-    stores: STORES.map((code) => {
-      const c = cells[pn][code];
-      return {
-        code,
-        fetched: c.fetched,
-        available: c.fetched ? c.available : false,
-        error: c.fetched ? null : c.error,
-      };
-    }),
-  }));
-
-  const failedCount = products.reduce(
-    (sum, p) => sum + p.stores.filter((s) => !s.fetched).length,
-    0
-  );
 
   return NextResponse.json({
     checkedAt: new Date().toISOString(),
     stores: STORES.map((code) => ({ code, name: storeNames[code] || code })),
-    products,
-    failedCount,
+    products: PRODUCTS.map((pn) => ({
+      partNumber: pn,
+      name: byProduct[pn]?.name || pn,
+      stores: STORES.map((code) => ({
+        code,
+        available: byProduct[pn]?.stores[code]?.available || false,
+        status: byProduct[pn]?.stores[code]?.status || 0, // 📌 [แก้ไข 4] พ่นค่า status ออกมาให้ดู
+      })),
+    })),
+    errors,
   });
 }
