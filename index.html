@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apple Store Stock Checker</title>
+    <!-- โหลด Tailwind CSS เบื้องต้น -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-4 md:p-10 font-sans">
+
+    <div class="max-w-2xl mx-auto bg-white p-6 md:p-8 rounded-xl shadow-lg">
+        <h1 class="text-2xl font-bold mb-6 text-center text-gray-800">🍎 Apple Store Thailand เช็คสถานะสินค้า</h1>
+        
+        <div class="flex gap-3 mb-6">
+            <input type="text" id="partInput" value="MJY54ZP/A" placeholder="Part Number (เช่น MJY54ZP/A)" 
+                   class="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <button onclick="checkStatus()" id="checkBtn" 
+                    class="bg-blue-600 text-white font-semibold px-6 py-3 rounded-lg hover:bg-blue-700 transition">
+                ค้นหา
+            </button>
+        </div>
+
+        <div id="loading" class="hidden text-center text-gray-500 my-8">
+            <span class="animate-pulse font-medium">กำลังดึงข้อมูลจาก Apple Store...</span>
+        </div>
+        
+        <div id="results" class="space-y-4"></div>
+    </div>
+
+    <script>
+        // ⚠️ เอา URL ของ Google Apps Script ที่คัดลอกไว้ มาใส่ตรงนี้
+        const GAS_URL = 'https://script.google.com/macros/s/AKfycbz9sdTugrd_3iFIsfGtW86S1lo7OirEieq_G3TWnBt5suHObjh5hjgxWfoVnutlVRvJ7g/exec';
+
+        async function checkStatus() {
+            const btn = document.getElementById('checkBtn');
+            const resultsDiv = document.getElementById('results');
+            const loading = document.getElementById('loading');
+            const part = document.getElementById('partInput').value.trim();
+
+            if(!part) return alert("กรุณาใส่ Part Number");
+
+            resultsDiv.innerHTML = '';
+            loading.classList.remove('hidden');
+            btn.disabled = true;
+            btn.classList.add('opacity-50');
+
+            try {
+                // ยิง API ไปที่ GAS ของเรา
+                const response = await fetch(`${GAS_URL}?part=${part}`);
+                const res = await response.json();
+
+                if (res.status === 'success' && res.data.length > 0) {
+                    res.data.forEach(store => {
+                        const isAvail = store.storeSelectionEnabled; // ใช้ตัวเลือกนี้ในการเช็คว่ากดสั่งได้ไหม
+                        
+                        // สร้าง HTML แสดงผลแต่ละสาขา
+                        const card = `
+                            <div class="border rounded-lg p-5 flex items-center justify-between ${isAvail ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}">
+                                <div>
+                                    <h2 class="text-xl font-bold text-gray-800">${store.storeName}</h2>
+                                    <p class="text-sm mt-1 ${isAvail ? 'text-green-700 font-medium' : 'text-red-600'}">${store.quote}</p>
+                                </div>
+                                <div class="text-right">
+                                    ${isAvail ? 
+                                        '<span class="px-4 py-2 bg-green-500 text-white rounded-full text-sm font-bold shadow-sm">🛒 สั่งซื้อได้</span>' : 
+                                        '<span class="px-4 py-2 bg-red-500 text-white rounded-full text-sm font-bold shadow-sm">❌ หมด</span>'
+                                    }
+                                </div>
+                            </div>
+                        `;
+                        resultsDiv.innerHTML += card;
+                    });
+                } else {
+                    resultsDiv.innerHTML = `<p class="text-red-500 text-center font-medium">ไม่พบข้อมูลของสินค้านี้</p>`;
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `<p class="text-red-500 text-center">เกิดข้อผิดพลาดในการเชื่อมต่อ กรุณาลองใหม่</p>`;
+            } finally {
+                loading.classList.add('hidden');
+                btn.disabled = false;
+                btn.classList.remove('opacity-50');
+            }
+        }
+
+        // โหลดข้อมูลอัตโนมัติตอนเปิดเว็บ
+        window.onload = checkStatus;
+    </script>
+</body>
+</html>

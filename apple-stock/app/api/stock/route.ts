@@ -7,7 +7,7 @@ export const maxDuration = 30;
 /** ====== แก้ตรงนี้ให้ตรงกับรุ่น/สาขาที่ต้องการติดตาม ====== */
 const STORES = ['R733', 'R728']; // รหัสสาขา Apple Store
 const PRODUCTS = [
-  'MJXQ4ZP/A',
+  'MJY34ZP/A',
   'MJXV4ZP/A',
   'MJXP4ZP/A',
   'MJXU4ZP/A',
