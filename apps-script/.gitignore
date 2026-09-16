@@ -1,0 +1,3 @@
+node_modules/
+.clasp.json
+dev/.devdata.json

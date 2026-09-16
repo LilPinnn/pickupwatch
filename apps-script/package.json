@@ -1,0 +1,11 @@
+{
+  "name": "pickupwatch-apps-script",
+  "private": true,
+  "scripts": {
+    "dev": "node --watch dev/server.js",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
